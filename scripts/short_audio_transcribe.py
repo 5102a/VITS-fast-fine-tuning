@@ -1,3 +1,4 @@
+import pandas as pd
 import whisper
 import os
 import json
@@ -6,10 +7,12 @@ import argparse
 import torch
 
 lang2token = {
-            'zh': "[ZH]",
-            'ja': "[JA]",
-            "en": "[EN]",
-        }
+    'zh': "[ZH]",
+    'ja': "[JA]",
+    "en": "[EN]",
+}
+
+
 def transcribe_one(audio_path):
     # load audio and pad/trim it to fit 30 seconds
     audio = whisper.load_audio(audio_path)
@@ -29,11 +32,18 @@ def transcribe_one(audio_path):
     # print the recognized text
     print(result.text)
     return lang, result.text
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--languages", default="CJE")
-    parser.add_argument("--whisper_size", default="medium")
+    parser.add_argument("--whisper_size", default="large")
     args = parser.parse_args()
+    # 读取ODS文件
+    dataframe = pd.read_excel('ys.ods', engine='odf',
+                              sheet_name=1).loc[:, ["语音文件", "文本"]]
+
+    file_map = dict(zip(dataframe["语音文件"], dataframe["文本"]))
     if args.languages == "CJE":
         lang2token = {
             'zh': "[ZH]",
@@ -49,7 +59,8 @@ if __name__ == "__main__":
         lang2token = {
             'zh': "[ZH]",
         }
-    assert (torch.cuda.is_available()), "Please enable GPU in order to run Whisper!"
+    assert (torch.cuda.is_available()
+            ), "Please enable GPU in order to run Whisper!"
     model = whisper.load_model(args.whisper_size)
     parent_dir = "./custom_character_voice/"
     speaker_names = list(os.walk(parent_dir))[0][1]
@@ -71,22 +82,25 @@ if __name__ == "__main__":
                                           channels_first=True)
                 wav = wav.mean(dim=0).unsqueeze(0)
                 if sr != target_sr:
-                    wav = torchaudio.transforms.Resample(orig_freq=sr, new_freq=target_sr)(wav)
+                    wav = torchaudio.transforms.Resample(
+                        orig_freq=sr, new_freq=target_sr)(wav)
                 if wav.shape[1] / sr > 20:
                     print(f"{wavfile} too long, ignoring\n")
                 save_path = parent_dir + speaker + "/" + f"processed_{i}.wav"
                 torchaudio.save(save_path, wav, target_sr, channels_first=True)
                 # transcribe text
-                lang, text = transcribe_one(save_path)
+                # lang, text = transcribe_one(save_path)
+                lang, text = ('zh', file_map[wavfile])
                 if lang not in list(lang2token.keys()):
                     print(f"{lang} not supported, ignoring\n")
                     continue
                 text = lang2token[lang] + text + lang2token[lang] + "\n"
                 speaker_annos.append(save_path + "|" + speaker + "|" + text)
-                
+
                 processed_files += 1
                 print(f"Processed: {processed_files}/{total_files}")
-            except:
+            except TypeError as e:
+                print(e)
                 continue
 
     # # clean annotation
